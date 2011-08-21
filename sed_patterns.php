@@ -15,17 +15,275 @@ $plugin['flags'] = 0;
 
 if( @txpinterface === 'admin' ) 
 {
-	global $event, $prefs, $txpcfg;
-	$files_path = $prefs['file_base_path'];
-	$debug = 0;
+	/**
+	 * Strings for internationalisation. Adjust as needed for your language...
+	 **/
+	static $sed_patterns_texts = array(
+		'h2.summary'       => 'Summary of Actions',
+		'summary'          => 'The following {pattern} elements will be installed&#8230;',
+		'existing-changed' => 'Cannot install this copy of {name} [{version}] as the installed copy has edits that you would loose.',
+		'existing-newer'   => 'Cannot install this copy of {name} [{version}] as it is older than the installed version [{installed_version}].',
+		'existing-same'    => 'Plugin already installed.',
+	);
 
+	/**
+	 * DO NOT EDIT ANYTHING ELSE!
+	 **/
+
+	/**
+	 * Install the language strings...
+	 **/
+	global $textarray;
+	foreach( $sed_patterns_texts as $k => $v )
+		$textarray['sed_patterns_'.$k] = $v;
+
+
+	/**
+	 * The elements interface enforces a known standard on all element types.
+	 *
+	 * Elements can be plugins, pages, forms, styles, section, categories, images (public), images (admin), strings or external files (JS, static CSS).
+	 **/
+	interface sed_patterns_element
+	{
+		/**
+		 * Expands a blobbed element into an unblobbed element. For some element types, this is idempotent.
+		 * @return the deblobbed element or return false if deblobbing fails;
+		 **/
+		static public function deblob( $blobbed_element );	
+
+		/**
+		 * Determine if the element can be safely installed. Eg: check plugin doesn't exist or, if it does, has no edits and is not a newer version.
+		 * @return true if installation is possible, else a string giving the reason installation is not possible.
+		 **/
+		static public function can_install( $element, $name );
+
+		/**
+		 * Installs the element.
+		 * @return true if installation was carried out with no errors, else a string giving the reason why the install failed.
+		 * Some installers (plugins) use the blobbed version for installation.
+		 **/
+		static public function install( $element , $blobbed_element, $name );
+	}
+
+
+	/**
+	 * Common base class.
+	 **/
+	class sed_patterns_common
+	{
+		static public final function t( $msg, $args = array() )
+		{
+			return gTxt( 'sed_patterns_'.$msg, $args );
+		}
+
+		static public function deblob( $blobbed_element )
+		{
+			return $blobbed_element;
+		}
+
+		static public function can_install( $element, $name )
+		{
+			return __METHOD__ . ' No way!';
+		}
+
+		/**
+		 * Installs the element.
+		 * @return true if installation was carried out with no errors, else a string giving the reason why the install failed.
+		 **/
+		static public function install( $element, $blobbed_element, $name )
+		{
+			return __METHOD__ . ' No way!';
+		}
+	}
+
+
+	/**
+	 * Class sed_patterns_form
+	 **/
+	class sed_patterns_form
+		extends sed_patterns_common
+		implements sed_patterns_element
+	{
+		static public function can_install( $element, $name )
+		{
+			$p = explode('.',$name);
+			
+			$existing = safe_row( '*' , 'txp_form' , "`name`='{$p[0]}' AND `type`='{$p[1]}'" );
+			if( empty( $existing ) )
+				return true;
+
+			$existing['Form'] = trim( $existing['Form'] );
+			if( empty($existing['Form']))
+				return true;
+
+			if( $existing['Form'] === trim( $element ) )
+				return 'Form already installed.';
+
+			return 'Form already exists and is not empty.';
+		}
+
+		/**
+		 * Installs the element.
+		 * @return true if installation was carried out with no errors, else a string giving the reason why the install failed.
+		 **/
+		static public function install( $element, $blobbed_element, $name )
+		{
+			$p = explode('.',$name);
+			$type = doSlash( array_pop($p) );
+			$name = doSlash( implode( '.', $p ) );
+			$form = doSlash( $element );
+
+			safe_upsert( 'txp_form', "`Form`='$form', `type`='$type'", "`name`='$name'" ); # TODO add error reporting
+			return true;
+		}
+	}
+
+	/**
+	 * Class sed_patterns_page
+	 **/
+	class sed_patterns_page
+		extends sed_patterns_common
+		implements sed_patterns_element
+	{
+		static public function can_install( $element, $name )
+		{
+			$name = doSlash($name);
+			$existing = safe_row( '*' , 'txp_page' , "`name`='{$name}'" );
+			if( empty( $existing ) )
+				return true;
+
+			$existing['user_html'] = trim( $existing['user_html'] );
+			if( empty($existing['user_html']))
+				return true;
+
+			if( $existing['user_html'] === trim( $element ) )
+				return 'Page already installed.';
+
+			return 'This page already exists and is not empty.';
+		}
+
+		/**
+		 * Installs the element.
+		 * @return true if installation was carried out with no errors, else a string giving the reason why the install failed.
+		 **/
+		static public function install( $element, $blobbed_element, $name )
+		{
+			$name = doSlash($name);
+			$page = doSlash($element);
+
+			safe_upsert( 'txp_page', "`user_html`='$page'", "`name`='$name'" ); # TODO add error reporting
+			return true;
+		}
+
+	}
+
+	/**
+	 * 
+	 **/
+	class sed_patterns_plugin 
+		extends sed_patterns_common
+		implements sed_patterns_element
+	{
+		/**
+		 *	Takes a compiled plugin blob and decodes it to a normal plugin.
+		 */
+		static public function deblob( $blobbed_element )
+		{
+			$plugin = preg_replace('/^#.*$/m', '', $blobbed_element );
+			if ($plugin === null)
+				return false;
+
+			$plugin = base64_decode($plugin);
+
+			if (strncmp($plugin, "\x1F\x8B", 2) === 0) 
+				$plugin = gzinflate(substr($plugin, 10));
+
+			if ($plugin = @unserialize($plugin)) {
+				if(!is_array($plugin))
+					return false;
+			}
+			else
+				return false;
+
+			return $plugin;
+		}
+
+
+		/**
+		 * 	Determines if the given de-blobbed plugin can be installed...
+		 *
+		 * 	It can be installed if not currently installed OR
+		 * 	currently installed version is older && unchanged from original
+		 *
+		 * 	Return values: true => PROCEED, string => DO NOT INSTALL, string is reason.
+		 */
+		static public function can_install( $plugin, $name )
+		{
+			$pname = doSlash( $plugin['name'] );
+			$existing = safe_row('*, abs(strcmp(md5(code),code_md5)) as modified','txp_plugin', "`name`='{$pname}'" );
+			if( $existing ) {
+				if( (bool)$existing['modified'] )	{ # Don't allow mods to plugins to be overwrittern as this may destroy existing site functionality...
+					return self::t('existing-changed', array( 
+						'{name}'              => htmlspecialchars($plugin['name']), 
+						'{version}'           => htmlspecialchars($plugin['version']), 
+					));
+				}
+				elseif( version_compare( $plugin['version'], $existing['version'] ) ) {	# Don't allow downgrading of an installed plugin...
+					return self::t('existing-newer', array( 
+						'{installed_version}' => htmlspecialchars($existing['version']),
+						'{name}'              => htmlspecialchars($plugin['name']), 
+						'{version}'           => htmlspecialchars($plugin['version']), 
+					));
+				}
+				elseif( version_compare( $plugin['version'], $existing['version'], '=' ) ) {
+					return self::t('existing-same', array(
+						'{name}'              => htmlspecialchars($plugin['name']), 
+						'{version}'           => htmlspecialchars($plugin['version']), 		
+					));
+				}
+			}
+
+			return true;
+		}
+
+		static public function install( $plugin, $blobbed_plugin, $name )
+		{
+			global $txpcfg, $event;
+			include_once $txpcfg['txpath']. DS . 'include' . DS . 'txp_plugin.php';
+
+			$_POST['plugin64'] = $blobbed_plugin;
+			$_POST['event'] = 'plugin';
+
+			$current_event = $event;
+			
+			#
+			#	Use a new output buffer to swallow the view that is output by calling plugin_install()
+			#
+			ob_start();
+			plugin_install();
+			ob_clean();
+
+			#
+			#	Unfortunately, due to Txp's lack of separation of view from model, we loose the result of the install and have to assume it went ok.
+			#
+			return true;
+		}
+	}
+
+
+	/**
+	 * 
+	 **/
 	class sed_patterns
+		extends sed_patterns_common
 	{
 		const EVENT       = 'sed_patterns';
-		#const UI_EVENT    = 'sed_patterns_ui';
 		const PRIVS       = '1';
 		const PATTERN_EXT = 'pattern';
 		const TAB		  = 'Patterns';
+
+
+		# =======================================================================================
 
 
 		static private function valid_pattern_name( &$s )
@@ -36,91 +294,161 @@ if( @txpinterface === 'admin' )
 		}
 
 		/**
-		 *
+		 * Unpacks a given tmp file and checks if it is a properly structured pattern blob.
 		 */
-		static private function process_package( $filename )
+		static public function deblob( $filename )
 		{
-			$package = file_get_contents( $filename );
-			if( false === $package ) {
+			$blob = file_get_contents( $filename );
+			if( false === $blob ) {
 				self::show( 'Uploaded file could not be opened.' );
 				return false;
 			}
 
-			$package = @base64_decode( $package );
-			if( false === $package ) {
+			$blob = preg_replace('/^#.*$/m', '', $blob);
+			if( null === $blob ) {
+				self::show( 'Uploaded file could not be opened.' );
+				return false;
+			}
+			
+			$blob = @base64_decode( $blob );
+			if( false === $blob ) {
 				self::show( 'Uploaded file could not be opened.' );
 				return false;
 			}
 
-			$package = @gzinflate( $package );
-			if( false === $package ) {
+			$blob = @gzinflate( $blob );
+			if( false === $blob ) {
 				self::show( 'Uploaded file could not be opened.' );
 				return false;
 			}
 
-			$p = unserialize( $package );
+			$p = unserialize( $blob );
 			if( !is_array($p) ) {
 				self::show( 'Uploaded file could not be opened.' );
 				unset( $p );
 				return false;
 			}
 
-			if( !$p['info']['description.textile'] ) {
+			if( !$p['info']['name'] ) {
 				self::show( 'Uploaded file could not be opened.' );
 				unset( $p );
 				return false;
 			}
 
-			pagetop( self::TAB );
+			return $p;
+		}
 
+
+		static private function action_summary( &$pattern, $blob_location )
+		{
 			global $txpcfg;
 			include_once $txpcfg['txpath']. DS . 'lib' . DS . 'classTextile.php';
 			$txt = new Textile();
-			echo $txt->TextileThis( $p['info']['description.textile'] );
-
+			echo $txt->TextileRestricted( $pattern['info']['help.textile'], 0, 0 );
 			# TODO genarate a log report of all the items added and their initial values...
-
-			dmp( $p );
-
+			echo '<h2>'.self::t('h2.summary').'</h2>'.
+				 '<p>' .self::t('summary', array( '{pattern}'=> $pattern['info']['name'])).'</p>';
 		}
 
-		static public function import( $event, $step )
+
+		/**
+		 *	Public entry point for handling the upload event...	
+		 */
+		static public function upload( $event, $step )
 		{
 			$name = $_FILES['thefile']['name'];
 			$disp_name = htmlspecialchars( $name );
-			if( is_string($name) && !empty($name) && self::valid_pattern_name($name) ) {
-				if( $_FILES['thefile']['error'] === UPLOAD_ERR_OK ) {
-					$tmp_name = $_FILES['thefile']['tmp_name'];
 
-					global $prefs;
-					$txp_tmpdir = $prefs['tempdir'];
-
-					$file = get_uploaded_file($_FILES['thefile']['tmp_name'], $txp_tmpdir.DS.basename($_FILES['thefile']['tmp_name']));
-					if( $file ) {
-						$result = self::process_package( $file );
-					}
-					else
-						self::show( 'File upload failed.' );
-				}
-				else
-					self::show( 'Error uploading package ['.$disp_name.']' );
+			if( !is_string($name) || empty($name) || !self::valid_pattern_name($name) ) {
+				self::show( 'Please upload a valid patterns package' );
+				return;
 			}
-			else
-				self::show( 'Please supply a valid patterns package' );
+
+			if( $_FILES['thefile']['error'] !== UPLOAD_ERR_OK ) {
+				self::show( 'Error uploading package ['.$disp_name.']' );
+				return;
+			}
+
+			global $prefs;
+			$txp_tmpdir = $prefs['tempdir'];
+			$tmp_name   = $_FILES['thefile']['tmp_name'];
+			$blob_location =  $txp_tmpdir.DS.basename($_FILES['thefile']['tmp_name']);
+			$file = get_uploaded_file($_FILES['thefile']['tmp_name'], $blob_location);
+
+			if( !$file ) {
+				self::show( 'File upload failed.' );
+				return;
+			}
+
+			$pattern = self::deblob( $file );
+			if( false === $pattern ) {
+				self::show( 'Uploaded file not packaged correctly.' );
+				return;
+			}
+
+			pagetop( self::TAB );
+			self::action_summary( $pattern, $blob_location );
+			echo "<div id=\"list_container\" class=\"txp-container txp-list\">
+					<table id=\"list\" class=\"list\">
+					<caption>Installation Actions...</caption>
+					<thead><tr><th>Action</th><th>Result</th><th>Notes&#8230;</th></tr></thead>
+					<tbody>";
+			foreach( $pattern['elements'] as $name => $blobbed_element ) {
+				echo "<tr>";
+
+				$p = explode( '.', $name );
+				$type = strtolower(trim(array_pop( $p )));
+				$name = implode( '.', $p );
+				echo '<td>Installing '.htmlspecialchars($type.' "'.$name).'"</td>';
+			
+				$deblobber = array("sed_patterns_{$type}", 'deblob');
+				$checker   = array("sed_patterns_{$type}", 'can_install');
+				$installer = array("sed_patterns_{$type}", 'install');
+
+				if( is_callable($deblobber) && is_callable($checker) && is_callable($installer) ) {
+					$element    = call_user_func( $deblobber, $blobbed_element );
+					if( false === $element ) {
+						echo td('ERROR','','not-ok').td('Could not understand the format of this element','','not-ok')."</tr>\n";
+						continue;
+					}
+
+					$can_install = call_user_func( $checker, $element, $name );
+					if( true !== $can_install ) {
+						echo '<td>SKIPPED</td><td>'.htmlspecialchars($can_install)."</td></tr>\n";
+						continue;
+					}
+
+					$installed = call_user_func( $installer, $element, $blobbed_element, $name );
+					if( true !== $installed ) {
+						echo td('ERROR','','not-ok').td( htmlspecialchars($installed), '', 'not-ok' )."</tr>\n";
+						continue;
+					}
+
+					echo td('OK').td('Installed');
+				} else
+					echo td('ERROR','','not-ok').td('No handler for this type of element','','not-ok');
+
+				echo "</tr>\n";
+			}
+			echo "</tbody></table></div>\n\n";
+			unset( $pattern );
 		}
 
-		static public function show($msg = '')
+
+		static private function show($msg = '')
 		{
 			pagetop( self::TAB, $msg );
-			echo<<<HTML
-<h1>SED Patterns</h1>
-HTML;
-			echo upload_form( 'Install Pattern Pack', '', 'import', self::EVENT, '');
+			echo '<h1>SED Patterns</h1>';
+			echo upload_form( 'Install Pattern Pack', '', 'upload', self::EVENT, '');
 		}
 
+
+		/**
+		 *	Public entry point for rendering the default (home) page
+		 */
 		static public function home( $event, $step )
 		{
-			if( $step && in_array($step, array('import') ))
+			if( $step && in_array($step, array('upload') ))
 				self::$step( $event, $step );
 			else {
 				self::show();
@@ -128,158 +456,13 @@ HTML;
 		}
 	}
 
-	add_privs( sed_patterns::EVENT,    sed_patterns::PRIVS );
+	add_privs( sed_patterns::EVENT, sed_patterns::PRIVS );
 	register_tab('extensions', sed_patterns::EVENT, gTxt( sed_patterns::TAB ) );
 	register_callback( 'sed_patterns::home', sed_patterns::EVENT );
 
 	# TODO add an installation+enable handler that will take care of keeping the plugin disabled if gzinflate is not installed.
 
 /*
-	#
-	#	identify installable files found in the files/ directory...
-	#
-	include_once $txpcfg['txpath']. DS . 'include' . DS . 'txp_plugin.php';
-	$files = array();
-	$path = $files_path;
-	if( $debug ) echo br , "Auto Install Plugins... Accessing dir($path) ...";
-	$dir = @dir( $path );
-	if( $dir === false )
-	{
-		if( $debug ) echo " failed!";
-	}
-	else
-	{
-		while( $file = $dir->read() )
-		{
-			$parts = pathinfo($file);
-			$fileaddr = $path.DS.$file;
-			if( !is_dir($fileaddr) )
-			{
-				if( $debug ) echo br , "... found ($file)";
-				switch( @$parts['extension'] )
-				{
-					case 'plugin' :
-						$files['plugins'][] = $file;
-						if( $debug ) echo " : accepting as a candidate plugin file.";
-						break;
-					case 'css' :
-						$files['css'][] = $file;
-						if( $debug ) echo " : accepting as a candidate CSS file.";
-						break;
-					case 'page' :
-						$files['page'][] = $file;
-						if( $debug ) echo " : accepting as a candidate Txp page file.";
-						break;
-					case 'form' :
-						$files['form'][] = $file;
-						if( $debug ) echo " : accepting as a candidate Txp form file.";
-						break;
-					default:
-						break;
-				}
-			}
-		}
-	}
-	$dir->close();
-
-
-	#
-	#	Try to auto-install any plugin files found in the files directory...
-	#
-	$plugin_count = 0;
-	if( empty( $files['plugins'] ) )
-	{
-		if( $debug ) echo " no plugin candidate files found.";
-	}
-	else
-	{
-		include_once $txpcfg['txpath'].'/lib/txplib_head.php';
-		foreach( $files['plugins'] as $file )
-		{
-			if( $debug ) echo br , "Processing $file : ";
-			#
-			#	Load the file into the $_POST['plugin64'] entry and try installing it...
-			#
-			$plugin = join( '', file($path.DS.$file) );
-			$_POST['plugin64'] = $plugin;
-			if( $debug ) echo "installing,";
-			plugin_install();
-			$plugin_count += 1;
-			unlink( $path.DS.$file );
-		}
-	}
-
-
-	#
-	#	Try to install any CSS files found...
-	#
-	if( empty( $files['css'] ) )
-	{
-		if( $debug ) echo " no CSS candidates found.";
-	}
-	else
-	{
-		foreach( $files['css'] as $file )
-		{
-			if( $debug ) echo br , "Processing $file : ";
-			$content = doSlash( file_get_contents( $path.DS.$file ) );
-			$parts = pathinfo($file);
-			$name = doSlash( $parts['filename'] );
-			safe_upsert( 'txp_css', "`css`='$content'", "`name`='$name'" , $debug );
-			unlink( $path.DS.$file );
-		}
-	}
-
-
-	#
-	#	Try to install any page files found...
-	#
-	if( empty( $files['page'] ) )
-	{
-		if( $debug ) echo " no page candidates found.";
-	}
-	else
-	{
-		foreach( $files['page'] as $file )
-		{
-			if( $debug ) echo br , "Processing $file : ";
-			$content = doSlash( file_get_contents( $path.DS.$file ) );
-			$parts = pathinfo($file);
-			$name = doSlash( $parts['filename'] );
-			safe_upsert( 'txp_page', "`user_html`='$content'", "`name`='$name'" , $debug );
-			unlink( $path.DS.$file );
-		}
-	}
-
-
-	#
-	#	Try to install any form files found...
-	#
-	#	Filename format = name.type.form
-	#	where type is one of { article, link, file, comment, misc }
-	#
-	if( empty( $files['form'] ) )
-	{
-		if( $debug ) echo " no form candidates found.";
-	}
-	else
-	{
-		foreach( $files['form'] as $file )
-		{
-			if( $debug ) echo br , "Processing $file : ";
-			$content = doSlash( file_get_contents( $path.DS.$file ) );
-			$parts = pathinfo($file);
-			$tmp = explode( '.', $parts['filename'] );
-			$type = doSlash( array_pop($tmp) );
-			$name = doSlash( implode( '.', $tmp ) );
-
-			echo br, "Found form $name of type $type.";
-			safe_upsert( 'txp_form', "`Form`='$content', `type`='$type'", "`name`='$name'" , $debug );
-			unlink( $path.DS.$file );
-		}
-	}
-
-
 	#
 	# Process the cleanups.php file...
 	#

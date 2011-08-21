@@ -30,7 +30,7 @@ bc.. patterns/
                 |---- info
                 |       |---- directions.script
                 |       |---- thumbnail.png
-                |       `---- description.textile
+                |       `---- help.textile
                 `---- elements
                         |---- zem_contact_reborn.plugin
 						|---- zem_contact_lang.plugin
