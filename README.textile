@@ -1,10 +1,90 @@
-h1. sed_pattern_import
+h1. sed_patterns
 
 h2. Description.
 
+This plugin allows you to import or export archived (gzdeflated) packages of elements (pages/forms/styles/plugins/sections/prefs/strings/js/images) that form a "pattern":http://developer.fellowshipone.com/patterns/.
+
+Importing a pattern package is not always possible as there may be name clashes between the elements being imported and existing elements.
+
+Packages are uploaded via the admin interface and installed in much the same way as smd_admin_themes installs themes for the admin interface. 
+
+h2. Dependencies
+
+This plugin relies upon the gzinflate() php function which is not available on every installation. If it is not available, the plugin will disable itself with an explanatory message.
+
 h2. To Do.
+
+* Grab import mechanism from sed_cleaner.
+* Grab scripting mechanism from sed_cleaner for instructions file.
+* Grab compression/decompression routines from smd_admin_themes.
+* Package definition & export mechanism.
+
+h2. Packaging your own patterns.
+
+Setup a directory structure similar to the one shown below for an example pattern called zem_contact_form.
+Create info/thumbnail.png (a 200px * 100px png) and info/description.textile
+
+bc.. patterns/
+    |
+    `---- zem_contact_form			# This is the root of your pattern.
+                |---- info
+                |       |---- directions.script
+                |       |---- thumbnail.png
+                |       `---- description.textile
+                `---- elements
+                        |---- zem_contact_reborn.plugin
+						|---- zem_contact_lang.plugin
+						|---- rvm_counter.plugin
+						|---- contact_form_layout.misc.form
+						|---- contact_form_email.misc.form
+						|---- contact_form_counter.misc.form
+						`---- contact_form.section
+
+p. If your pattern includes static elements such as js, css or images you can provide mappings for these in the config.
+
+Once you have your pattern ready to go, make sure that the pattern packager is in your path and then compile the package...
+
+bc.. cd /path/to/make_sed_pattern
+chmod u+x make_sed_pattern
+./make_sed_pattern /path/to/patterns/zem_contact_form
+
+p. Then check in the zem_contact_form directory for the file @zem_contact_form.pattern@.
+
+h2. Just what can be imported?
+
+All of the following elements can be included in your pattern pack...
+
+| plugins |
+| forms |
+| pages |
+| styles |
+| javascript |
+| sections |
+| articles |
+| categories |
+| images (public side) |
+| images (admin side) |
+| strings of text |
+
+
+h2. Instructions Script -- Summary Of Actions.
+
+* SetPref
+* Add/Remove/Update Section
+* Add/Remove/Update Category
+* Enable/Disable Plugin
+* Add Article
+
+h2. Example Packages.
+
+|_. Pattern |_. Comprises |
+| Contact Form | zem_contact_reborn + zem_contact_lang + rvm_counter + cf_counter.form + cf_address.form + cf_form.form + contact.page + dialog with user to collect email address for cf_address.form |
+| Steps wizard | images + js + css + dialog with user to collect name for containing page/form |
+| Persistent Message |  |
+| Modal dialog | |
+| Sortable columns | |
 
 h2. License.
 
-p. This project is released under the 
+This project is released under the GPLv2.
 
