@@ -58,24 +58,29 @@ if( @txpinterface === 'admin' )
 				return false;
 			}
 
-			$pattern = unserialize( $package );
-			if( !is_array($pattern) ) {
+			$p = unserialize( $package );
+			if( !is_array($p) ) {
 				self::show( 'Uploaded file could not be opened.' );
-				unset( $pattern );
+				unset( $p );
 				return false;
 			}
 
-			if( !$pattern['info']['description.textile'] ) {
+			if( !$p['info']['description.textile'] ) {
 				self::show( 'Uploaded file could not be opened.' );
-				unset( $pattern );
+				unset( $p );
 				return false;
 			}
 
-			# TODO run the description through textile...
+			pagetop( self::TAB );
+
+			global $txpcfg;
+			include_once $txpcfg['txpath']. DS . 'lib' . DS . 'classTextile.php';
+			$txt = new Textile();
+			echo $txt->TextileThis( $p['info']['description.textile'] );
 
 			# TODO genarate a log report of all the items added and their initial values...
 
-			dmp( $pattern );
+			dmp( $p );
 
 		}
 
@@ -86,18 +91,13 @@ if( @txpinterface === 'admin' )
 			if( is_string($name) && !empty($name) && self::valid_pattern_name($name) ) {
 				if( $_FILES['thefile']['error'] === UPLOAD_ERR_OK ) {
 					$tmp_name = $_FILES['thefile']['tmp_name'];
-#					dmp( __METHOD__ . " ... Attempting to install Pattern Package [$disp_name] uploaded to [$tmp_name]." );
 
 					global $prefs;
 					$txp_tmpdir = $prefs['tempdir'];
 
 					$file = get_uploaded_file($_FILES['thefile']['tmp_name'], $txp_tmpdir.DS.basename($_FILES['thefile']['tmp_name']));
 					if( $file ) {
-#						dmp( "Uploaded file moved to [$file]" );
-#						$content = file_get_contents( $file );
-#						dmp( '<pre>'.$content.'</pre>' );
 						$result = self::process_package( $file );
-
 					}
 					else
 						self::show( 'File upload failed.' );
